@@ -50,6 +50,7 @@ pub(crate) struct ChatWidget<'a> {
     token_usage: TokenUsage,
     reasoning_buffer: String,
     answer_buffer: String,
+    reasoning_inserted_len: usize,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -139,6 +140,7 @@ impl ChatWidget<'_> {
             token_usage: TokenUsage::default(),
             reasoning_buffer: String::new(),
             answer_buffer: String::new(),
+            reasoning_inserted_len: 0,
         }
     }
 
@@ -289,12 +291,26 @@ impl ChatWidget<'_> {
                     if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
                         self.app_event_tx.send(AppEvent::InsertHistory(lines));
                     }
+                    self.reasoning_inserted_len = self.reasoning_buffer.len();
                 } else {
                     self.reasoning_buffer.push_str(&delta);
                     self.conversation_history.replace_prev_agent_reasoning(
                         &self.config,
                         self.reasoning_buffer.clone(),
                     );
+                    // Append only the newly added delta text to scrollback so
+                    // users can watch reasoning stream progressively.
+                    let new_segment = &self.reasoning_buffer[self.reasoning_inserted_len..];
+                    if !new_segment.is_empty() {
+                        let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                        for l in new_segment.lines() {
+                            lines.push(ratatui::text::Line::from(l.to_string()));
+                        }
+                        if !lines.is_empty() {
+                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                            self.reasoning_inserted_len = self.reasoning_buffer.len();
+                        }
+                    }
                 }
                 self.request_redraw();
             }
