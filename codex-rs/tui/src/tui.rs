@@ -36,7 +36,7 @@ pub fn init(config: &Config) -> Result<(Tui, MouseCapture)> {
     // is an initial step of the refactor – later the height can become
     // dynamic. For now a conservative default keeps enough room for the
     // multi‑line composer while not occupying the whole screen.
-    const BOTTOM_VIEWPORT_HEIGHT: u16 = 14;
+    const BOTTOM_VIEWPORT_HEIGHT: u16 = 8;
     let backend = CrosstermBackend::new(stdout());
     let tui = Terminal::with_options(
         backend,

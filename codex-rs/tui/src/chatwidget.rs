@@ -266,22 +266,36 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 if self.answer_buffer.is_empty() {
+                    // First chunk – create a history entry with the partial content.
+                    self.answer_buffer.push_str(&delta);
                     self.conversation_history
-                        .add_agent_message(&self.config, "".to_string());
+                        .add_agent_message(&self.config, self.answer_buffer.clone());
+                    if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                        self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                    }
+                } else {
+                    // Subsequent chunk – update in ephemeral view only.
+                    self.answer_buffer.push_str(&delta);
+                    self.conversation_history
+                        .replace_prev_agent_message(&self.config, self.answer_buffer.clone());
                 }
-                self.answer_buffer.push_str(&delta.clone());
-                self.conversation_history
-                    .replace_prev_agent_message(&self.config, self.answer_buffer.clone());
                 self.request_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 if self.reasoning_buffer.is_empty() {
+                    self.reasoning_buffer.push_str(&delta);
                     self.conversation_history
-                        .add_agent_reasoning(&self.config, "".to_string());
+                        .add_agent_reasoning(&self.config, self.reasoning_buffer.clone());
+                    if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                        self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                    }
+                } else {
+                    self.reasoning_buffer.push_str(&delta);
+                    self.conversation_history.replace_prev_agent_reasoning(
+                        &self.config,
+                        self.reasoning_buffer.clone(),
+                    );
                 }
-                self.reasoning_buffer.push_str(&delta.clone());
-                self.conversation_history
-                    .replace_prev_agent_reasoning(&self.config, self.reasoning_buffer.clone());
                 self.request_redraw();
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
