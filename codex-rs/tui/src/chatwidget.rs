@@ -50,13 +50,10 @@ pub(crate) struct ChatWidget<'a> {
     token_usage: TokenUsage,
     reasoning_buffer: String,
     answer_buffer: String,
-    reasoning_inserted_len: usize,
-    reasoning_first_emitted: bool,
-    // Track how many bytes of the (streaming) assistant answer we have
-    // already inserted into the immutable scrollback so we can append only
-    // newly completed lines. Mirrors the logic used for reasoning chunks.
-    answer_inserted_len: usize,
-    answer_first_emitted: bool,
+    // Buffer for streaming assistant answer text; we do not surface partial
+    // output line‑by‑line anymore (to avoid truncation issues). We wait for
+    // the final AgentMessage event and then emit the full text at once into
+    // scrollback so the history contains a single immutable message.
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -146,10 +143,6 @@ impl ChatWidget<'_> {
             token_usage: TokenUsage::default(),
             reasoning_buffer: String::new(),
             answer_buffer: String::new(),
-            reasoning_inserted_len: 0,
-            reasoning_first_emitted: false,
-            answer_inserted_len: 0,
-            answer_first_emitted: false,
         }
     }
 
@@ -264,147 +257,54 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // Final assistant message (non‑streaming or completion of a
-                // prior streaming sequence). Treat any remaining content after
-                // the last emitted newline as a final line in scrollback.
-                if self.answer_first_emitted {
-                    self.answer_buffer = message.clone();
-                    if self.answer_inserted_len < self.answer_buffer.len() {
-                        let remaining = &self.answer_buffer[self.answer_inserted_len..];
-                        if !remaining.is_empty() {
-                            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                            for line in remaining.lines() {
-                                lines.push(ratatui::text::Line::from(line.to_string()));
-                            }
-                            if !self.answer_buffer.ends_with('\n') && !remaining.ends_with('\n') {
-                                if !remaining.contains('\n') {
-                                    // Single unterminated line – already captured above.
-                                }
-                            }
-                            if !lines.is_empty() {
-                                self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                            }
-                        }
-                    }
+                // Final assistant answer. Prefer the fully provided message
+                // from the event; if it is empty fall back to any accumulated
+                // delta buffer (some providers may only stream deltas and send
+                // an empty final message).
+                let full = if message.is_empty() {
+                    std::mem::take(&mut self.answer_buffer)
                 } else {
-                    // No streaming occurred; insert full message as one block.
-                    if !message.is_empty() {
-                        self.conversation_history
-                            .add_agent_message(&self.config, message.clone());
-                        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
-                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                        }
-                    }
-                }
-                self.answer_buffer.clear();
-                self.answer_inserted_len = 0;
-                self.answer_first_emitted = false;
-                self.request_redraw();
-            }
-            EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
-                // Accumulate streaming assistant response. Only emit *complete*
-                // lines so previously inserted scrollback lines remain
-                // immutable and we still provide a near‑real‑time experience.
-                self.answer_buffer.push_str(&delta);
-                if !self.answer_first_emitted {
-                    if let Some(idx) = self.answer_buffer.rfind('\n') {
-                        let complete = &self.answer_buffer[..=idx];
-                        self.conversation_history
-                            .add_agent_message(&self.config, complete.to_string());
-                        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
-                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                        }
-                        self.answer_first_emitted = true;
-                        self.answer_inserted_len = idx + 1;
-                    }
-                } else {
-                    let new_segment = &self.answer_buffer[self.answer_inserted_len..];
-                    if let Some(last_nl) = new_segment.rfind('\n') {
-                        let upto = self.answer_inserted_len + last_nl + 1;
-                        let complete_seg = &self.answer_buffer[self.answer_inserted_len..upto];
-                        if !complete_seg.is_empty() {
-                            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                            for line in complete_seg.lines() {
-                                lines.push(ratatui::text::Line::from(line.to_string()));
-                            }
-                            if !lines.is_empty() {
-                                self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                                self.answer_inserted_len = upto;
-                            }
-                        }
-                    }
-                }
-                self.request_redraw();
-            }
-            EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
-                // Accumulate reasoning text; only emit complete lines to scrollback.
-                self.reasoning_buffer.push_str(&delta);
-                if !self.reasoning_first_emitted {
-                    if let Some(idx) = self.reasoning_buffer.rfind('\n') {
-                        let complete = &self.reasoning_buffer[..=idx];
-                        self.conversation_history
-                            .add_agent_reasoning(&self.config, complete.to_string());
-                        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
-                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                        }
-                        self.reasoning_first_emitted = true;
-                        self.reasoning_inserted_len = idx + 1;
-                    }
-                } else {
-                    let new_segment = &self.reasoning_buffer[self.reasoning_inserted_len..];
-                    if let Some(last_nl) = new_segment.rfind('\n') {
-                        let upto = self.reasoning_inserted_len + last_nl + 1;
-                        let complete_seg =
-                            &self.reasoning_buffer[self.reasoning_inserted_len..upto];
-                        if !complete_seg.is_empty() {
-                            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                            for line in complete_seg.lines() {
-                                lines.push(ratatui::text::Line::from(line.to_string()));
-                            }
-                            if !lines.is_empty() {
-                                self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                                self.reasoning_inserted_len = upto;
-                            }
-                        }
-                    }
-                }
-                self.request_redraw();
-            }
-            EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
-                // Final reasoning text received; flush any remaining partial line(s).
-                self.reasoning_buffer = text.clone();
-                if !self.reasoning_first_emitted {
-                    // No prior emission – emit everything now.
+                    self.answer_buffer.clear();
+                    message
+                };
+                if !full.is_empty() {
                     self.conversation_history
-                        .add_agent_reasoning(&self.config, self.reasoning_buffer.clone());
+                        .add_agent_message(&self.config, full);
                     if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
                         self.app_event_tx.send(AppEvent::InsertHistory(lines));
                     }
-                } else if self.reasoning_inserted_len < self.reasoning_buffer.len() {
-                    let remaining = &self.reasoning_buffer[self.reasoning_inserted_len..];
-                    if !remaining.is_empty() {
-                        let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                        for line in remaining.lines() {
-                            lines.push(ratatui::text::Line::from(line.to_string()));
-                        }
-                        // If the final text does not end with a newline, the last
-                        // line won't be returned by .lines() with trailing empty; we
-                        // still want to surface it.
-                        if !self.reasoning_buffer.ends_with('\n')
-                            && !remaining.ends_with('\n')
-                            && !remaining.ends_with('\r')
-                        {
-                            if !remaining.contains('\n') {
-                                // Already captured above; nothing extra needed.
-                            }
-                        }
-                        if !lines.is_empty() {
-                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                        }
+                }
+                self.request_redraw();
+            }
+            EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
+                // Buffer only – do not emit partial lines. This avoids cases
+                // where long responses appear truncated if the terminal
+                // wrapped early. The full message is emitted on
+                // AgentMessage.
+                self.answer_buffer.push_str(&delta);
+            }
+            EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
+                // Buffer only – disable incremental reasoning streaming so we
+                // avoid truncated intermediate lines. Full text emitted on
+                // AgentReasoning.
+                self.reasoning_buffer.push_str(&delta);
+            }
+            EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                // Emit full reasoning text once. Some providers might send
+                // final event with empty text if only deltas were used.
+                let full = if text.is_empty() {
+                    std::mem::take(&mut self.reasoning_buffer)
+                } else {
+                    self.reasoning_buffer.clear();
+                    text
+                };
+                if !full.is_empty() {
+                    self.conversation_history
+                        .add_agent_reasoning(&self.config, full);
+                    if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                        self.app_event_tx.send(AppEvent::InsertHistory(lines));
                     }
                 }
-                self.reasoning_buffer.clear();
-                self.answer_buffer.clear();
                 self.request_redraw();
             }
             EventMsg::TaskStarted => {
