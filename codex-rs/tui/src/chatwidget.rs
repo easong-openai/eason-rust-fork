@@ -23,9 +23,6 @@ use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Constraint;
-use ratatui::layout::Direction;
-use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
@@ -447,6 +444,9 @@ impl ChatWidget<'_> {
             event => {
                 self.conversation_history
                     .add_background_event(format!("{event:?}"));
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
                 self.request_redraw();
             }
         }
@@ -463,7 +463,10 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
-        self.conversation_history.add_diff_output(diff_output);
+        self.conversation_history.add_diff_output(diff_output.clone());
+        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+        }
         self.request_redraw();
     }
 
@@ -517,15 +520,10 @@ impl ChatWidget<'_> {
 
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let bottom_height = self.bottom_pane.calculate_required_height(&area);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(bottom_height)])
-            .split(area);
-
-        self.conversation_history.render(chunks[0], buf);
-        (&self.bottom_pane).render(chunks[1], buf);
+        // In the hybrid inline viewport mode we only draw the interactive
+        // bottom pane; history entries are injected directly into scrollback
+        // via `Terminal::insert_before`.
+        (&self.bottom_pane).render(area, buf);
     }
 }
 

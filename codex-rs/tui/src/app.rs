@@ -17,6 +17,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use ratatui::layout::Rect;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;

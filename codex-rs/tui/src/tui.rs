@@ -11,7 +11,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
-use ratatui::terminal::TerminalOptions;
+use ratatui::TerminalOptions;
 use ratatui::Viewport;
 
 use crate::mouse_capture::MouseCapture;
