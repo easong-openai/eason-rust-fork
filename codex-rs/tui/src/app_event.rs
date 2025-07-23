@@ -49,4 +49,9 @@ pub(crate) enum AppEvent {
         query: String,
         matches: Vec<FileMatch>,
     },
+
+    /// Insert pre-rendered history lines into the terminal scrollback
+    /// (native scroll mode). Each `Line` is expected to already contain
+    /// styling and wrapping decisions.
+    InsertHistory(Vec<ratatui::text::Line<'static>>),
 }

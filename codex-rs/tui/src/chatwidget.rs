@@ -125,10 +125,13 @@ impl ChatWidget<'_> {
             }
         });
 
+        let mut conversation_history = ConversationHistoryWidget::new();
+        conversation_history.set_app_event_sender(app_event_tx.clone());
+
         Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
-            conversation_history: ConversationHistoryWidget::new(),
+            conversation_history,
             bottom_pane: BottomPane::new(BottomPaneParams {
                 app_event_tx,
                 has_input_focus: true,
@@ -492,13 +495,26 @@ impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let bottom_height = self.bottom_pane.calculate_required_height(&area);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(bottom_height)])
-            .split(area);
+        if std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok() {
+            // In native scroll mode we dedicate the entire viewport to the
+            // bottom pane; historical lines live in the terminal scrollback
+            // above the inline viewport.
+            let pane_area = Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(bottom_height),
+                width: area.width,
+                height: bottom_height,
+            };
+            (&self.bottom_pane).render(pane_area, buf);
+        } else {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(bottom_height)])
+                .split(area);
 
-        self.conversation_history.render(chunks[0], buf);
-        (&self.bottom_pane).render(chunks[1], buf);
+            self.conversation_history.render(chunks[0], buf);
+            (&self.bottom_pane).render(chunks[1], buf);
+        }
     }
 }
 

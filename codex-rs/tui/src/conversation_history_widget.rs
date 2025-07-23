@@ -1,4 +1,6 @@
 use crate::cell_widget::CellWidget;
+use crate::app_event::AppEvent;
+use crate::app_event_sender::AppEventSender;
 use crate::history_cell::CommandOutput;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
@@ -33,6 +35,13 @@ pub struct ConversationHistoryWidget {
     /// The height of the viewport last time render_ref() was called
     last_viewport_height: StdCell<usize>,
     has_input_focus: bool,
+    /// When true we bypass the custom scrollback implementation and instead
+    /// emit new history lines via `AppEvent::InsertHistory`, allowing the
+    /// main app loop to push them into the terminal scrollback using
+    /// `Terminal::insert_before`. This is an experimental stepping stone
+    /// towards the full inline viewport design in `history-plan-inline.md`.
+    native_scrollback: bool,
+    app_event_tx: Option<AppEventSender>,
 }
 
 impl ConversationHistoryWidget {
@@ -44,7 +53,13 @@ impl ConversationHistoryWidget {
             num_rendered_lines: StdCell::new(0),
             last_viewport_height: StdCell::new(0),
             has_input_focus: false,
+            native_scrollback: std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok(),
+            app_event_tx: None,
         }
+    }
+
+    pub(crate) fn set_app_event_sender(&mut self, tx: AppEventSender) {
+        self.app_event_tx = Some(tx);
     }
 
     pub(crate) fn set_input_focus(&mut self, has_input_focus: bool) {
@@ -255,6 +270,14 @@ impl ConversationHistoryWidget {
             cell,
             line_count: Cell::new(count),
         });
+
+        if self.native_scrollback {
+            if let Some(tx) = &self.app_event_tx {
+                let last = self.entries.last().unwrap();
+                let lines = last.cell.cloned_lines();
+                tx.send(AppEvent::InsertHistory(lines));
+            }
+        }
     }
 
     pub fn replace_last_agent_reasoning(&mut self, config: &Config, text: String) {
@@ -369,6 +392,15 @@ impl ConversationHistoryWidget {
 
 impl WidgetRef for ConversationHistoryWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        if self.native_scrollback {
+            // In native scrollback mode we do not render the historical
+            // conversation inside the ratatui buffer. The lines have already
+            // been inserted into the terminal scrollback via
+            // `Terminal::insert_before` (triggered at insertion time). We
+            // purposefully leave this area blank so the enclosing layout can
+            // allocate all available space to the bottom pane / composer.
+            return;
+        }
         let (title, border_style) = if self.has_input_focus {
             (
                 "Messages (↑/↓ or j/k = line,  b/space = page)",

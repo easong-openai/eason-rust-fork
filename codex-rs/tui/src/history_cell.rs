@@ -123,6 +123,31 @@ pub(crate) enum HistoryCell {
 const TOOL_CALL_MAX_LINES: usize = 5;
 
 impl HistoryCell {
+    /// Clone the full logical lines associated with this cell.  Used by the
+    /// experimental native scrollback path to feed pre-rendered lines to
+    /// `Terminal::insert_before` without going through the legacy
+    /// scroll-widget windowing logic.
+    pub(crate) fn cloned_lines(&self) -> Vec<Line<'static>> {
+        match self {
+            HistoryCell::WelcomeMessage { view }
+            | HistoryCell::UserPrompt { view }
+            | HistoryCell::AgentMessage { view }
+            | HistoryCell::AgentReasoning { view }
+            | HistoryCell::ActiveExecCommand { view, .. }
+            | HistoryCell::CompletedExecCommand { view }
+            | HistoryCell::ActiveMcpToolCall { view, .. }
+            | HistoryCell::CompletedMcpToolCall { view }
+            | HistoryCell::BackgroundEvent { view }
+            | HistoryCell::GitDiffOutput { view }
+            | HistoryCell::ErrorEvent { view }
+            | HistoryCell::SessionInfo { view }
+            | HistoryCell::PendingPatch { view } => view.lines.clone(),
+            HistoryCell::CompletedMcpToolCallWithImageOutput { .. } => vec![
+                Line::from("<image output>"),
+                Line::from(""),
+            ],
+        }
+    }
     pub(crate) fn new_session_info(
         config: &Config,
         event: SessionConfiguredEvent,

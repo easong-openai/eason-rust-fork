@@ -328,6 +328,20 @@ impl App<'_> {
                     }
                 }
             }
+            AppEvent::InsertHistory(lines) => {
+                // Render the provided lines *above* the inline viewport so
+                // they become part of the terminal's native scrollback. This
+                // path is a transitional feature guarded by the
+                // CODEX_TUI_NATIVE_SCROLL env var; when unset this event is
+                // never produced.
+                if std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok() {
+                    use ratatui::widgets::Paragraph;
+                    let height: u16 = lines.len() as u16; // lines already wrapped
+                    let _ = terminal.insert_before(height, |buf| {
+                        Paragraph::new(lines.clone()).render(buf.area, buf);
+                    });
+                }
+            }
         }
         terminal.clear()?;
 

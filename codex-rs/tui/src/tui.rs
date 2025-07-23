@@ -7,6 +7,8 @@ use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableMouseCapture;
 use crossterm::event::EnableBracketedPaste;
 use ratatui::Terminal;
+use ratatui::terminal::TerminalOptions;
+use ratatui::Viewport;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::EnterAlternateScreen;
@@ -21,13 +23,29 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 /// Initialize the terminal
 pub fn init(config: &Config) -> Result<(Tui, MouseCapture)> {
-    execute!(stdout(), EnterAlternateScreen)?;
+    let native_scroll = std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok();
+    if !native_scroll {
+        execute!(stdout(), EnterAlternateScreen)?;
+    }
     execute!(stdout(), EnableBracketedPaste)?;
     let mouse_capture = MouseCapture::new_with_capture(!config.tui.disable_mouse_capture)?;
 
     enable_raw_mode()?;
     set_panic_hook();
-    let tui = Terminal::new(CrosstermBackend::new(stdout()))?;
+    let backend = CrosstermBackend::new(stdout());
+    let tui = if native_scroll {
+        // Reserve an inline viewport for the interactive bottom UI.  Height
+        // is a conservative fixed value; future iterations can make this
+        // dynamic or reconstruct the terminal when it changes.
+        Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(20),
+            },
+        )?
+    } else {
+        Terminal::new(backend)?
+    };
     Ok((tui, mouse_capture))
 }
 
@@ -48,7 +66,9 @@ pub fn restore() -> Result<()> {
         // on shutdown, so ignore the error in this case.
     }
     execute!(stdout(), DisableBracketedPaste)?;
-    execute!(stdout(), LeaveAlternateScreen)?;
+    if std::env::var("CODEX_TUI_NATIVE_SCROLL").is_err() {
+        execute!(stdout(), LeaveAlternateScreen)?;
+    }
     disable_raw_mode()?;
     Ok(())
 }
