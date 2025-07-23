@@ -108,6 +108,16 @@ impl FileSearchPopup {
             .map(|file_match| file_match.path.as_str())
     }
 
+    /// Plain text export of current matches for the hybrid UI.
+    pub(crate) fn plain_entries(&self) -> Vec<(String, bool)> {
+        self.matches
+            .iter()
+            .take(MAX_RESULTS)
+            .enumerate()
+            .map(|(i, m)| (m.path.clone(), Some(i) == self.selected_idx))
+            .collect()
+    }
+
     /// Preferred height (rows) including border.
     pub(crate) fn calculate_required_height(&self, _area: &Rect) -> u16 {
         // Row count depends on whether we already have matches. If no matches

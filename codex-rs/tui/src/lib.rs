@@ -1,7 +1,11 @@
-// Forbid accidental stdout/stderr writes in the *library* portion of the TUI.
-// The standalone `codex-tui` binary prints a short help message before the
-// alternate‑screen mode starts; that file opts‑out locally via `allow`.
-#![deny(clippy::print_stdout, clippy::print_stderr)]
+// Previously this crate forbade all stdout/stderr writes (enforced via
+// `#![deny(clippy::print_stdout, clippy::print_stderr)]`) because the UI used a
+// fullscreen alternate screen managed by ratatui. The new append‑only hybrid
+// mode intentionally prints history lines directly to stdout so they remain in
+// the user's scrollback. We therefore relax the restriction so the hybrid
+// implementation (in `hybrid_mode.rs`) can emit lines. Other modules still try
+// to avoid ad‑hoc printing.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
 use app::App;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -43,6 +47,8 @@ mod status_indicator_widget;
 mod text_block;
 mod text_formatting;
 mod tui;
+mod hybrid_mode;
+pub mod hybrid_sim; // test harness (pure, no terminal side-effects)
 mod user_approval_widget;
 
 pub use cli::Cli;
@@ -147,7 +153,11 @@ pub fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> std::io::
     // `--allow-no-git-exec` flag.
     let show_git_warning = !cli.skip_git_repo_check && !is_inside_git_repo(&config);
 
-    try_run_ratatui_app(cli, config, show_login_screen, show_git_warning, log_rx);
+    // Always run the new append‑only hybrid mode. (The legacy fullscreen
+    // ratatui implementation remains in the tree for now but is no longer
+    // invoked.)
+    // NOTE: hybrid mode owns the terminal raw mode lifecycle internally.
+    hybrid_mode::run_hybrid(cli, config, log_rx).expect("hybrid mode failed");
     Ok(())
 }
 

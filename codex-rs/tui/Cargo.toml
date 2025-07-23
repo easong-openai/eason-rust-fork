@@ -11,6 +11,9 @@ path = "src/main.rs"
 name = "codex_tui"
 path = "src/lib.rs"
 
+[features]
+test-fake-agent = []
+
 [lints]
 workspace = true
 
@@ -63,3 +66,4 @@ uuid = "1"
 [dev-dependencies]
 insta = "1.43.1"
 pretty_assertions = "1"
+nix = { version = "0.28" }

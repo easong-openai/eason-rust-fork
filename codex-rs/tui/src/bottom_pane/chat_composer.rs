@@ -620,6 +620,39 @@ impl ChatComposer<'_> {
         rows as u16 + BORDER_LINES + num_popup_rows
     }
 
+    // --- Hybrid (append‑only) helpers ------------------------------------
+    /// Export the current textarea lines and cursor position for the hybrid
+    /// stdout renderer.
+    pub(crate) fn export_plaintext(&self) -> (Vec<String>, (usize, usize)) {
+        (
+            self.textarea.lines().iter().map(|s| s.to_string()).collect(),
+            self.textarea.cursor(),
+        )
+    }
+
+    /// Plain text popup lines (command or file search) for the hybrid UI.
+    pub(crate) fn popup_plaintext_lines(&self, width: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        match &self.active_popup {
+            ActivePopup::Command(popup) => {
+                for (text, sel) in popup.plain_entries() {
+                    let mut line = if sel { format!("> {text}") } else { format!("  {text}") };
+                    if line.chars().count() > width { line = line.chars().take(width).collect(); }
+                    out.push(line);
+                }
+            }
+            ActivePopup::File(popup) => {
+                for (path, sel) in popup.plain_entries() {
+                    let mut line = if sel { format!("> {path}") } else { format!("  {path}") };
+                    if line.chars().count() > width { line = line.chars().take(width).collect(); }
+                    out.push(line);
+                }
+            }
+            ActivePopup::None => {}
+        }
+        out
+    }
+
     fn update_border(&mut self, has_focus: bool) {
         struct BlockState {
             right_title: Line<'static>,

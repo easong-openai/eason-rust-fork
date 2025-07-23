@@ -36,6 +36,13 @@ async fn create_temp_git_repo() -> anyhow::Result<TempDir> {
         .output()
         .await?;
 
+    // Ensure tests do not depend on a configured GPG agent for commit signing.
+    Command::new("git")
+        .args(["config", "commit.gpgsign", "false"])
+        .current_dir(repo_path)
+        .output()
+        .await?;
+
     std::fs::write(repo_path.join("README.md"), "# Test Repo\n")?;
 
     Command::new("git")

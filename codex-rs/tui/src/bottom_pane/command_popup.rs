@@ -139,6 +139,24 @@ impl CommandPopup {
         let matches = self.filtered_commands();
         self.selected_idx.and_then(|idx| matches.get(idx).copied())
     }
+
+    /// Export plain text entries for the hybrid append‑only UI.
+    /// Each tuple is (display, selected?). Limited to the same MAX_POPUP_ROWS
+    /// used for the fullscreen widget rendering.
+    pub(crate) fn plain_entries(&self) -> Vec<(String, bool)> {
+        let matches = self.filtered_commands();
+        matches
+            .into_iter()
+            .take(MAX_POPUP_ROWS)
+            .enumerate()
+            .map(|(i, cmd)| {
+                (
+                    format!("/{} - {}", cmd.command(), cmd.description()),
+                    Some(i) == self.selected_idx,
+                )
+            })
+            .collect()
+    }
 }
 
 impl WidgetRef for CommandPopup {

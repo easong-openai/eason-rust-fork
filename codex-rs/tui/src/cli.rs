@@ -53,4 +53,18 @@ pub struct Cli {
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
+
+    /// Exit automatically after the FIRST full assistant response finishes.
+    ///
+    /// By default, even if you supply an initial prompt (`codex "hello"`),
+    /// the session stays open so you can continue chatting. Passing
+    /// `--auto-exit` turns the interactive TUI into a *one‑shot* mode without
+    /// switching to `codex exec` (so you still get history, approvals, or
+    /// future multi‑turn context if the model makes additional tool calls
+    /// before answering). The process exits right after the assistant prints
+    /// its first completed answer.
+    ///
+    /// Example: `codex --auto-exit "summarize this repository"`
+    #[arg(long = "auto-exit", default_value_t = false, help_heading = "Session control")] 
+    pub auto_exit: bool,
 }
