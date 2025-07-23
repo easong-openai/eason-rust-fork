@@ -7,3 +7,5 @@ In the codex-rs folder where the rust code lives:
 Before creating a pull request with changes to `codex-rs`, run `just fmt` (in `codex-rs` directory) to format the code and `just fix` (in `codex-rs` directory) to fix any linter issues in the code, ensure the test suite passes by running `cargo test --all-features` in the `codex-rs` directory.
 
 When making individual changes prefer running tests on individual files or projects first.
+
+Refer to the ratatui-docs folder when you have any questions about ratatui or think there might be a useful method.
