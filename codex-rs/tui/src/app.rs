@@ -329,10 +329,31 @@ impl App<'_> {
                     }
                 }
                 AppEvent::InsertHistory(lines) => {
-                    use ratatui::widgets::Paragraph;
-                    let height: u16 = lines.len() as u16;
-                    let _ = terminal.insert_before(height, |buf| {
-                        Paragraph::new(lines.clone()).render(buf.area, buf);
+                    use ratatui::widgets::{Paragraph, Wrap};
+                    // Determine current terminal width so we can accurately
+                    // compute wrapped height. If this fails, fall back to a
+                    // simple line count (no wrapping) to avoid panic.
+                    let (computed_height, wrap_enabled) = match terminal.size() {
+                        Ok(sz) => {
+                            let width = sz.width;
+                            if width == 0 { (lines.len() as u16, false) } else {
+                                // Use a temporary Paragraph to compute wrapped height.
+                                let para = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
+                                let line_count = para.line_count(width);
+                                (line_count as u16, true)
+                            }
+                        }
+                        Err(_) => (lines.len() as u16, false),
+                    };
+
+                    let _ = terminal.insert_before(computed_height, |buf| {
+                        if wrap_enabled {
+                            Paragraph::new(lines.clone())
+                                .wrap(Wrap { trim: false })
+                                .render(buf.area, buf);
+                        } else {
+                            Paragraph::new(lines.clone()).render(buf.area, buf);
+                        }
                     });
                 }
             }
