@@ -20,7 +20,9 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 /// Initialize the terminal
 pub fn init(config: &Config) -> Result<(Tui, MouseCapture)> {
     execute!(stdout(), EnableBracketedPaste)?;
-    let mouse_capture = MouseCapture::new_with_capture(!config.tui.disable_mouse_capture)?;
+    // Disable mouse capture so that scroll wheel / selection are handled by
+    // the terminal natively for the history scrollback area.
+    let mouse_capture = MouseCapture::new_with_capture(false)?;
 
     enable_raw_mode()?;
     set_panic_hook();

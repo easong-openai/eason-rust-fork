@@ -129,6 +129,8 @@ impl ChatWidget<'_> {
 
         let mut conversation_history = ConversationHistoryWidget::new();
         conversation_history.set_app_event_sender(app_event_tx.clone());
+        // Provisional banner so user sees context immediately.
+        conversation_history.add_background_event("codex starting (initializing session)…".to_string());
 
         Self {
             app_event_tx: app_event_tx.clone(),
