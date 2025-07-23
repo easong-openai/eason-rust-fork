@@ -130,7 +130,18 @@ impl ChatWidget<'_> {
         let mut conversation_history = ConversationHistoryWidget::new();
         conversation_history.set_app_event_sender(app_event_tx.clone());
         // Provisional banner so user sees context immediately.
-        conversation_history.add_background_event("codex starting (initializing session)…".to_string());
+        conversation_history
+            .add_background_event("codex starting (initializing session)…".to_string());
+
+        // If the user supplied an initial prompt, show it immediately so it
+        // is never lost behind early streaming output – we will still send it
+        // to the agent after the session config event arrives.
+        let initial_prompt_copy = initial_prompt.clone();
+        if let Some(ref p) = initial_prompt_copy {
+            if !p.trim().is_empty() {
+                conversation_history.add_user_message(p.clone());
+            }
+        }
 
         Self {
             app_event_tx: app_event_tx.clone(),
