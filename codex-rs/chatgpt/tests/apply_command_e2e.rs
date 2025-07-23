@@ -36,6 +36,14 @@ async fn create_temp_git_repo() -> anyhow::Result<TempDir> {
         .output()
         .await?;
 
+    // Disable commit signing which can fail in sandboxed environments without
+    // access to an agent socket.
+    Command::new("git")
+        .args(["config", "commit.gpgsign", "false"])
+        .current_dir(repo_path)
+        .output()
+        .await?;
+
     std::fs::write(repo_path.join("README.md"), "# Test Repo\n")?;
 
     Command::new("git")

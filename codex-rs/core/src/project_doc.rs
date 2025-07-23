@@ -167,6 +167,9 @@ mod tests {
     #[tokio::test]
     async fn no_doc_file_returns_none() {
         let tmp = tempfile::tempdir().expect("tempdir");
+        // Mark the temp dir as its own git root so project doc discovery does
+        // not walk up into the real repository (which has an AGENTS.md).
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
 
         let res = get_user_instructions(&make_config(&tmp, 4096, None)).await;
         assert!(
@@ -273,6 +276,7 @@ mod tests {
     #[tokio::test]
     async fn keeps_existing_instructions_when_doc_missing() {
         let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
 
         const INSTRUCTIONS: &str = "some instructions";
 

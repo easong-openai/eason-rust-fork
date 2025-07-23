@@ -629,7 +629,21 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::fs;
-    use tempfile::tempdir;
+    // Provide our own tempdir implementation to avoid sandbox permission
+    // issues when creating directories in the system temporary location.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static TEST_TMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    struct LocalTempDir { path: std::path::PathBuf }
+    impl LocalTempDir { fn path(&self) -> &std::path::Path { &self.path } }
+    impl Drop for LocalTempDir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.path); } }
+    fn tempdir() -> std::io::Result<LocalTempDir> {
+        let base = std::env::current_dir()?.join(".test-tmp");
+        std::fs::create_dir_all(&base)?;
+        let id = TEST_TMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = base.join(format!("case-{id}"));
+        std::fs::create_dir_all(&dir)?;
+        Ok(LocalTempDir { path: dir })
+    }
 
     /// Helper to construct a patch with the given body.
     fn wrap_patch(body: &str) -> String {

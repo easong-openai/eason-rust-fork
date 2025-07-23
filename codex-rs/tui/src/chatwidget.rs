@@ -24,8 +24,7 @@ use codex_core::protocol::TokenUsage;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
-use ratatui::layout::Direction;
-use ratatui::layout::Layout;
+use ratatui::prelude::Stylize; // for .magenta(), .bold(), .italic()
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
