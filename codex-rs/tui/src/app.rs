@@ -15,12 +15,12 @@ use codex_core::protocol::Event;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
-use ratatui::layout::Rect;
-use crossterm::event::MouseEvent;
-use crossterm::event::MouseEventKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -222,7 +222,12 @@ impl App<'_> {
                         .insert_before(height, |buf| {
                             let width = buf.area.width;
                             for (i, line) in lines.into_iter().enumerate() {
-                                let area = Rect { x: 0, y: i as u16, width, height: 1 };
+                                let area = Rect {
+                                    x: 0,
+                                    y: i as u16,
+                                    width,
+                                    height: 1,
+                                };
                                 Paragraph::new(line).render(area, buf);
                             }
                         })

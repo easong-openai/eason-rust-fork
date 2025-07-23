@@ -52,6 +52,11 @@ pub(crate) struct ChatWidget<'a> {
     answer_buffer: String,
     reasoning_inserted_len: usize,
     reasoning_first_emitted: bool,
+    // Track how many bytes of the (streaming) assistant answer we have
+    // already inserted into the immutable scrollback so we can append only
+    // newly completed lines. Mirrors the logic used for reasoning chunks.
+    answer_inserted_len: usize,
+    answer_first_emitted: bool,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -143,6 +148,8 @@ impl ChatWidget<'_> {
             answer_buffer: String::new(),
             reasoning_inserted_len: 0,
             reasoning_first_emitted: false,
+            answer_inserted_len: 0,
+            answer_first_emitted: false,
         }
     }
 
@@ -251,37 +258,75 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                if self.answer_buffer.is_empty() {
-                    self.conversation_history
-                        .add_agent_message(&self.config, message.clone());
-                    if !message.is_empty() {
-                        if let Some(lines) =
-                            self.conversation_history.last_entry_plain_lines()
-                        {
-                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                // Final assistant message (non‑streaming or completion of a
+                // prior streaming sequence). Treat any remaining content after
+                // the last emitted newline as a final line in scrollback.
+                if self.answer_first_emitted {
+                    self.answer_buffer = message.clone();
+                    if self.answer_inserted_len < self.answer_buffer.len() {
+                        let remaining = &self.answer_buffer[self.answer_inserted_len..];
+                        if !remaining.is_empty() {
+                            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                            for line in remaining.lines() {
+                                lines.push(ratatui::text::Line::from(line.to_string()));
+                            }
+                            if !self.answer_buffer.ends_with('\n') && !remaining.ends_with('\n') {
+                                if !remaining.contains('\n') {
+                                    // Single unterminated line – already captured above.
+                                }
+                            }
+                            if !lines.is_empty() {
+                                self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                            }
                         }
                     }
                 } else {
-                    self.conversation_history
-                        .replace_prev_agent_message(&self.config, message.clone());
+                    // No streaming occurred; insert full message as one block.
+                    if !message.is_empty() {
+                        self.conversation_history
+                            .add_agent_message(&self.config, message.clone());
+                        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                        }
+                    }
                 }
                 self.answer_buffer.clear();
+                self.answer_inserted_len = 0;
+                self.answer_first_emitted = false;
                 self.request_redraw();
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
-                if self.answer_buffer.is_empty() {
-                    // First chunk – create a history entry with the partial content.
-                    self.answer_buffer.push_str(&delta);
-                    self.conversation_history
-                        .add_agent_message(&self.config, self.answer_buffer.clone());
-                    if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
-                        self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                // Accumulate streaming assistant response. Only emit *complete*
+                // lines so previously inserted scrollback lines remain
+                // immutable and we still provide a near‑real‑time experience.
+                self.answer_buffer.push_str(&delta);
+                if !self.answer_first_emitted {
+                    if let Some(idx) = self.answer_buffer.rfind('\n') {
+                        let complete = &self.answer_buffer[..=idx];
+                        self.conversation_history
+                            .add_agent_message(&self.config, complete.to_string());
+                        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                        }
+                        self.answer_first_emitted = true;
+                        self.answer_inserted_len = idx + 1;
                     }
                 } else {
-                    // Subsequent chunk – update in ephemeral view only.
-                    self.answer_buffer.push_str(&delta);
-                    self.conversation_history
-                        .replace_prev_agent_message(&self.config, self.answer_buffer.clone());
+                    let new_segment = &self.answer_buffer[self.answer_inserted_len..];
+                    if let Some(last_nl) = new_segment.rfind('\n') {
+                        let upto = self.answer_inserted_len + last_nl + 1;
+                        let complete_seg = &self.answer_buffer[self.answer_inserted_len..upto];
+                        if !complete_seg.is_empty() {
+                            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                            for line in complete_seg.lines() {
+                                lines.push(ratatui::text::Line::from(line.to_string()));
+                            }
+                            if !lines.is_empty() {
+                                self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                                self.answer_inserted_len = upto;
+                            }
+                        }
+                    }
                 }
                 self.request_redraw();
             }
@@ -303,7 +348,8 @@ impl ChatWidget<'_> {
                     let new_segment = &self.reasoning_buffer[self.reasoning_inserted_len..];
                     if let Some(last_nl) = new_segment.rfind('\n') {
                         let upto = self.reasoning_inserted_len + last_nl + 1;
-                        let complete_seg = &self.reasoning_buffer[self.reasoning_inserted_len..upto];
+                        let complete_seg =
+                            &self.reasoning_buffer[self.reasoning_inserted_len..upto];
                         if !complete_seg.is_empty() {
                             let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                             for line in complete_seg.lines() {
@@ -349,7 +395,7 @@ impl ChatWidget<'_> {
                         if !lines.is_empty() {
                             self.app_event_tx.send(AppEvent::InsertHistory(lines));
                         }
-                }
+                    }
                 }
                 self.reasoning_buffer.clear();
                 self.answer_buffer.clear();
@@ -412,7 +458,7 @@ impl ChatWidget<'_> {
                 if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
                     self.app_event_tx.send(AppEvent::InsertHistory(lines));
                 }
-                
+
                 self.conversation_history.scroll_to_bottom();
 
                 // Now surface the approval request in the BottomPane as before.
@@ -516,7 +562,8 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
-        self.conversation_history.add_diff_output(diff_output.clone());
+        self.conversation_history
+            .add_diff_output(diff_output.clone());
         if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
             self.app_event_tx.send(AppEvent::InsertHistory(lines));
         }
