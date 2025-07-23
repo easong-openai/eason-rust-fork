@@ -243,6 +243,12 @@ impl ChatWidget<'_> {
                 // Record session information at the top of the conversation.
                 self.conversation_history
                     .add_session_info(&self.config, event.clone());
+                // Immediately surface the session banner / settings summary in
+                // scrollback so the user can review configuration (model,
+                // sandbox, approvals, etc.) before interacting.
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
 
                 // Forward history metadata to the bottom pane so the chat
                 // composer can navigate through past messages.
