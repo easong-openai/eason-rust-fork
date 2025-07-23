@@ -213,26 +213,55 @@ impl App<'_> {
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
                 AppEvent::InsertHistory(lines) => {
-                    // Best‑effort attempt to render the provided lines above the
-                    // inline viewport. This is an initial step toward the
-                    // planned hybrid history model. Each `Line` maps to exactly
-                    // one terminal row; long spans are truncated.
-                    let height = lines.len() as u16;
+                    // Insert logical history lines above the inline viewport.
+                    // Perform a simple width-based wrap so long unbroken
+                    // lines (e.g. a long model sentence) are fully visible
+                    // instead of being truncated. This keeps history immutable
+                    // while improving readability.
+                    use unicode_width::UnicodeWidthChar;
+                    let term_width = terminal.size().map(|a| a.width).unwrap_or(80);
+                    let mut wrapped: Vec<ratatui::text::Line<'static>> = Vec::new();
+                    for line in lines.into_iter() {
+                        if line.spans.is_empty() {
+                            wrapped.push(line);
+                            continue;
+                        }
+                        let mut cur_spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+                        let mut cur_width = 0usize;
+                        for span in line.spans.into_iter() {
+                            let style = span.style;
+                            for ch in span.content.chars() {
+                                let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
+                                if ch == '\n' {
+                                    wrapped.push(ratatui::text::Line::from(cur_spans.clone()));
+                                    cur_spans.clear();
+                                    cur_width = 0;
+                                    continue;
+                                }
+                                if cur_width + ch_w > term_width as usize && cur_width > 0 {
+                                    wrapped.push(ratatui::text::Line::from(cur_spans.clone()));
+                                    cur_spans.clear();
+                                    cur_width = 0;
+                                }
+                                let mut s = String::new();
+                                s.push(ch);
+                                cur_spans.push(ratatui::text::Span::styled(s, style));
+                                cur_width += ch_w;
+                            }
+                        }
+                        wrapped.push(ratatui::text::Line::from(cur_spans));
+                    }
+
+                    let total = wrapped.len() as u16;
                     terminal
-                        .insert_before(height, |buf| {
+                        .insert_before(total, |buf| {
                             let width = buf.area.width;
-                            for (i, line) in lines.into_iter().enumerate() {
-                                let area = Rect {
-                                    x: 0,
-                                    y: i as u16,
-                                    width,
-                                    height: 1,
-                                };
+                            for (i, line) in wrapped.into_iter().enumerate() {
+                                let area = Rect { x: 0, y: i as u16, width, height: 1 };
                                 Paragraph::new(line).render(area, buf);
                             }
                         })
                         .ok();
-                    // Redraw bottom viewport so cursor & status stay in sync.
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::RequestRedraw => {
