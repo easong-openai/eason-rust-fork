@@ -36,7 +36,6 @@ mod history_cell;
 mod log_layer;
 mod login_screen;
 mod markdown;
-mod mouse_capture;
 mod scroll_event_helper;
 mod slash_command;
 mod status_indicator_widget;
@@ -176,13 +175,12 @@ fn run_ratatui_app(
 ) -> color_eyre::Result<()> {
     color_eyre::install()?;
 
-    // Forward panic reports through the tracing stack so that they appear in
-    // the status indicator instead of breaking the alternate screen – the
-    // normal colour‑eyre hook writes to stderr which would corrupt the UI.
+    // Forward panic reports through tracing so they appear in the UI status
+    // line instead of interleaving raw panic output with the interface.
     std::panic::set_hook(Box::new(|info| {
         tracing::error!("panic: {info}");
     }));
-    let (mut terminal, mut mouse_capture) = tui::init(&config)?;
+    let mut terminal = tui::init(&config)?;
     terminal.clear()?;
 
     let Cli { prompt, images, .. } = cli;
@@ -204,7 +202,7 @@ fn run_ratatui_app(
         });
     }
 
-    let app_result = app.run(&mut terminal, &mut mouse_capture);
+    let app_result = app.run(&mut terminal);
 
     restore();
     app_result

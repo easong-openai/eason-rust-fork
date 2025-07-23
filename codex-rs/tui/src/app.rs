@@ -6,7 +6,6 @@ use crate::get_git_diff::get_git_diff;
 use crate::git_warning_screen::GitWarningOutcome;
 use crate::git_warning_screen::GitWarningScreen;
 use crate::login_screen::LoginScreen;
-use crate::mouse_capture::MouseCapture;
 use crate::scroll_event_helper::ScrollEventHelper;
 use crate::slash_command::SlashCommand;
 use crate::tui;
@@ -201,11 +200,7 @@ impl App<'_> {
         });
     }
 
-    pub(crate) fn run(
-        &mut self,
-        terminal: &mut tui::Tui,
-        mouse_capture: &mut MouseCapture,
-    ) -> Result<()> {
+    pub(crate) fn run(&mut self, terminal: &mut tui::Tui) -> Result<()> {
         // Insert an event to trigger the first render.
         let app_event_tx = self.app_event_tx.clone();
         app_event_tx.send(AppEvent::RequestRedraw);
@@ -404,11 +399,6 @@ impl App<'_> {
                         ));
                         self.app_state = AppState::Chat { widget: new_widget };
                         self.app_event_tx.send(AppEvent::RequestRedraw);
-                    }
-                    SlashCommand::ToggleMouseMode => {
-                        if let Err(e) = mouse_capture.toggle() {
-                            tracing::error!("Failed to toggle mouse mode: {e}");
-                        }
                     }
                     SlashCommand::Quit => {
                         break;

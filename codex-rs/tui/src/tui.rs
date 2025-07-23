@@ -4,7 +4,6 @@ use std::io::stdout;
 
 use codex_core::config::Config;
 use crossterm::event::DisableBracketedPaste;
-use crossterm::event::DisableMouseCapture;
 use crossterm::event::EnableBracketedPaste;
 use ratatui::Terminal;
 use ratatui::TerminalOptions;
@@ -14,22 +13,13 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
 
-use crate::mouse_capture::MouseCapture;
 
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-/// Initialize the terminal
-pub fn init(config: &Config) -> Result<(Tui, MouseCapture)> {
-    // We intentionally do NOT enter the alternate screen: the new hybrid UI
-    // model keeps history in the native terminal scrollback so users get
-    // natural scrolling + text selection. We still enable bracketed paste so
-    // multi‑line pastes arrive as a single event.
+/// Initialize the terminal (inline viewport; history stays in normal scrollback)
+pub fn init(_config: &Config) -> Result<Tui> {
     execute!(stdout(), EnableBracketedPaste)?;
-    // Disable mouse capture by default in inline viewport mode so that native
-    // terminal scrollback (wheel / trackpad) works naturally. Users can still
-    // enable it via the toggle command if desired.
-    let mouse_capture = MouseCapture::new_with_capture(false)?;
 
     enable_raw_mode()?;
     set_panic_hook();
@@ -47,7 +37,7 @@ pub fn init(config: &Config) -> Result<(Tui, MouseCapture)> {
             viewport: Viewport::Inline(BOTTOM_VIEWPORT_HEIGHT),
         },
     )?;
-    Ok((tui, mouse_capture))
+    Ok(tui)
 }
 
 fn set_panic_hook() {
@@ -60,12 +50,6 @@ fn set_panic_hook() {
 
 /// Restore the terminal to its original state
 pub fn restore() -> Result<()> {
-    // We are shutting down, and we cannot reference the `MouseCapture`, so we
-    // categorically disable mouse capture just to be safe.
-    if execute!(stdout(), DisableMouseCapture).is_err() {
-        // It is possible that `DisableMouseCapture` is written more than once
-        // on shutdown, so ignore the error in this case.
-    }
     execute!(stdout(), DisableBracketedPaste)?;
     disable_raw_mode()?;
     Ok(())
