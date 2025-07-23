@@ -220,7 +220,10 @@ impl ChatWidget<'_> {
 
         // Only show text portion in conversation history for now.
         if !text.is_empty() {
-            self.conversation_history.add_user_message(text);
+            self.conversation_history.add_user_message(text.clone());
+            if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                self.app_event_tx.send(AppEvent::InsertHistory(lines));
+            }
         }
         self.conversation_history.scroll_to_bottom();
     }
@@ -247,14 +250,19 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // if the answer buffer is empty, this means we haven't received any
-                // delta. Thus, we need to print the message as a new answer.
                 if self.answer_buffer.is_empty() {
                     self.conversation_history
-                        .add_agent_message(&self.config, message);
+                        .add_agent_message(&self.config, message.clone());
+                    if !message.is_empty() {
+                        if let Some(lines) =
+                            self.conversation_history.last_entry_plain_lines()
+                        {
+                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                        }
+                    }
                 } else {
                     self.conversation_history
-                        .replace_prev_agent_message(&self.config, message);
+                        .replace_prev_agent_message(&self.config, message.clone());
                 }
                 self.answer_buffer.clear();
                 self.request_redraw();
@@ -280,15 +288,19 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
-                // if the reasoning buffer is empty, this means we haven't received any
-                // delta. Thus, we need to print the message as a new reasoning.
                 if self.reasoning_buffer.is_empty() {
                     self.conversation_history
-                        .add_agent_reasoning(&self.config, "".to_string());
+                        .add_agent_reasoning(&self.config, text.clone());
+                    if !text.is_empty() {
+                        if let Some(lines) =
+                            self.conversation_history.last_entry_plain_lines()
+                        {
+                            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                        }
+                    }
                 } else {
-                    // else, we rerender one last time.
                     self.conversation_history
-                        .replace_prev_agent_reasoning(&self.config, text);
+                        .replace_prev_agent_reasoning(&self.config, text.clone());
                 }
                 self.reasoning_buffer.clear();
                 self.request_redraw();
@@ -310,7 +322,10 @@ impl ChatWidget<'_> {
                     .set_token_usage(self.token_usage.clone(), self.config.model_context_window);
             }
             EventMsg::Error(ErrorEvent { message }) => {
-                self.conversation_history.add_error(message);
+                self.conversation_history.add_error(message.clone());
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
                 self.bottom_pane.set_task_running(false);
             }
             EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
@@ -344,7 +359,10 @@ impl ChatWidget<'_> {
 
                 self.conversation_history
                     .add_patch_event(PatchEventType::ApprovalRequest, changes);
-
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
+                
                 self.conversation_history.scroll_to_bottom();
 
                 // Now surface the approval request in the BottomPane as before.
@@ -363,6 +381,9 @@ impl ChatWidget<'_> {
             }) => {
                 self.conversation_history
                     .add_active_exec_command(call_id, command);
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
                 self.request_redraw();
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
@@ -374,6 +395,9 @@ impl ChatWidget<'_> {
                 // summary so the user can follow along.
                 self.conversation_history
                     .add_patch_event(PatchEventType::ApplyBegin { auto_approved }, changes);
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
                 if !auto_approved {
                     self.conversation_history.scroll_to_bottom();
                 }
@@ -397,6 +421,9 @@ impl ChatWidget<'_> {
             }) => {
                 self.conversation_history
                     .add_active_mcp_tool_call(call_id, server, tool, arguments);
+                if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                    self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                }
                 self.request_redraw();
             }
             EventMsg::McpToolCallEnd(mcp_tool_call_end_event) => {

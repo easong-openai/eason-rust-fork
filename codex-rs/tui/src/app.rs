@@ -15,6 +15,9 @@ use codex_core::protocol::Event;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use ratatui::text::Line;
+use ratatui::widgets::Paragraph;
+use ratatui::layout::Rect;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use std::path::PathBuf;
@@ -208,6 +211,24 @@ impl App<'_> {
 
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
+                AppEvent::InsertHistory(lines) => {
+                    // Best‑effort attempt to render the provided lines above the
+                    // inline viewport. This is an initial step toward the
+                    // planned hybrid history model. Each `Line` maps to exactly
+                    // one terminal row; long spans are truncated.
+                    let height = lines.len() as u16;
+                    terminal
+                        .insert_before(height, |buf| {
+                            let width = buf.area.width;
+                            for (i, line) in lines.into_iter().enumerate() {
+                                let area = Rect { x: 0, y: i as u16, width, height: 1 };
+                                Paragraph::new(line).render(area, buf);
+                            }
+                        })
+                        .ok();
+                    // Redraw bottom viewport so cursor & status stay in sync.
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                }
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
