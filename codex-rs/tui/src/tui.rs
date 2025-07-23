@@ -26,7 +26,10 @@ pub fn init(config: &Config) -> Result<(Tui, MouseCapture)> {
     // natural scrolling + text selection. We still enable bracketed paste so
     // multi‑line pastes arrive as a single event.
     execute!(stdout(), EnableBracketedPaste)?;
-    let mouse_capture = MouseCapture::new_with_capture(!config.tui.disable_mouse_capture)?;
+    // Disable mouse capture by default in inline viewport mode so that native
+    // terminal scrollback (wheel / trackpad) works naturally. Users can still
+    // enable it via the toggle command if desired.
+    let mouse_capture = MouseCapture::new_with_capture(false)?;
 
     enable_raw_mode()?;
     set_panic_hook();

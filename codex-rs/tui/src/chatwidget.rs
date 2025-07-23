@@ -51,6 +51,7 @@ pub(crate) struct ChatWidget<'a> {
     reasoning_buffer: String,
     answer_buffer: String,
     reasoning_inserted_len: usize,
+    reasoning_first_emitted: bool,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -141,6 +142,7 @@ impl ChatWidget<'_> {
             reasoning_buffer: String::new(),
             answer_buffer: String::new(),
             reasoning_inserted_len: 0,
+            reasoning_first_emitted: false,
         }
     }
 
@@ -284,52 +286,73 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
-                if self.reasoning_buffer.is_empty() {
-                    self.reasoning_buffer.push_str(&delta);
-                    self.conversation_history
-                        .add_agent_reasoning(&self.config, self.reasoning_buffer.clone());
-                    if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
-                        self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                    }
-                    self.reasoning_inserted_len = self.reasoning_buffer.len();
-                } else {
-                    self.reasoning_buffer.push_str(&delta);
-                    self.conversation_history.replace_prev_agent_reasoning(
-                        &self.config,
-                        self.reasoning_buffer.clone(),
-                    );
-                    // Append only the newly added delta text to scrollback so
-                    // users can watch reasoning stream progressively.
-                    let new_segment = &self.reasoning_buffer[self.reasoning_inserted_len..];
-                    if !new_segment.is_empty() {
-                        let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                        for l in new_segment.lines() {
-                            lines.push(ratatui::text::Line::from(l.to_string()));
-                        }
-                        if !lines.is_empty() {
+                // Accumulate reasoning text; only emit complete lines to scrollback.
+                self.reasoning_buffer.push_str(&delta);
+                if !self.reasoning_first_emitted {
+                    if let Some(idx) = self.reasoning_buffer.rfind('\n') {
+                        let complete = &self.reasoning_buffer[..=idx];
+                        self.conversation_history
+                            .add_agent_reasoning(&self.config, complete.to_string());
+                        if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
                             self.app_event_tx.send(AppEvent::InsertHistory(lines));
-                            self.reasoning_inserted_len = self.reasoning_buffer.len();
+                        }
+                        self.reasoning_first_emitted = true;
+                        self.reasoning_inserted_len = idx + 1;
+                    }
+                } else {
+                    let new_segment = &self.reasoning_buffer[self.reasoning_inserted_len..];
+                    if let Some(last_nl) = new_segment.rfind('\n') {
+                        let upto = self.reasoning_inserted_len + last_nl + 1;
+                        let complete_seg = &self.reasoning_buffer[self.reasoning_inserted_len..upto];
+                        if !complete_seg.is_empty() {
+                            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                            for line in complete_seg.lines() {
+                                lines.push(ratatui::text::Line::from(line.to_string()));
+                            }
+                            if !lines.is_empty() {
+                                self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                                self.reasoning_inserted_len = upto;
+                            }
                         }
                     }
                 }
                 self.request_redraw();
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
-                if self.reasoning_buffer.is_empty() {
+                // Final reasoning text received; flush any remaining partial line(s).
+                self.reasoning_buffer = text.clone();
+                if !self.reasoning_first_emitted {
+                    // No prior emission – emit everything now.
                     self.conversation_history
-                        .add_agent_reasoning(&self.config, text.clone());
-                    if !text.is_empty() {
-                        if let Some(lines) =
-                            self.conversation_history.last_entry_plain_lines()
+                        .add_agent_reasoning(&self.config, self.reasoning_buffer.clone());
+                    if let Some(lines) = self.conversation_history.last_entry_plain_lines() {
+                        self.app_event_tx.send(AppEvent::InsertHistory(lines));
+                    }
+                } else if self.reasoning_inserted_len < self.reasoning_buffer.len() {
+                    let remaining = &self.reasoning_buffer[self.reasoning_inserted_len..];
+                    if !remaining.is_empty() {
+                        let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                        for line in remaining.lines() {
+                            lines.push(ratatui::text::Line::from(line.to_string()));
+                        }
+                        // If the final text does not end with a newline, the last
+                        // line won't be returned by .lines() with trailing empty; we
+                        // still want to surface it.
+                        if !self.reasoning_buffer.ends_with('\n')
+                            && !remaining.ends_with('\n')
+                            && !remaining.ends_with('\r')
                         {
+                            if !remaining.contains('\n') {
+                                // Already captured above; nothing extra needed.
+                            }
+                        }
+                        if !lines.is_empty() {
                             self.app_event_tx.send(AppEvent::InsertHistory(lines));
                         }
-                    }
-                } else {
-                    self.conversation_history
-                        .replace_prev_agent_reasoning(&self.config, text.clone());
+                }
                 }
                 self.reasoning_buffer.clear();
+                self.answer_buffer.clear();
                 self.request_redraw();
             }
             EventMsg::TaskStarted => {
