@@ -35,12 +35,6 @@ pub struct ConversationHistoryWidget {
     /// The height of the viewport last time render_ref() was called
     last_viewport_height: StdCell<usize>,
     has_input_focus: bool,
-    /// When true we bypass the custom scrollback implementation and instead
-    /// emit new history lines via `AppEvent::InsertHistory`, allowing the
-    /// main app loop to push them into the terminal scrollback using
-    /// `Terminal::insert_before`. This is an experimental stepping stone
-    /// towards the full inline viewport design in `history-plan-inline.md`.
-    native_scrollback: bool,
     app_event_tx: Option<AppEventSender>,
 }
 
@@ -53,7 +47,6 @@ impl ConversationHistoryWidget {
             num_rendered_lines: StdCell::new(0),
             last_viewport_height: StdCell::new(0),
             has_input_focus: false,
-            native_scrollback: std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok(),
             app_event_tx: None,
         }
     }
@@ -271,12 +264,10 @@ impl ConversationHistoryWidget {
             line_count: Cell::new(count),
         });
 
-        if self.native_scrollback {
-            if let Some(tx) = &self.app_event_tx {
-                let last = self.entries.last().unwrap();
-                let lines = last.cell.cloned_lines();
-                tx.send(AppEvent::InsertHistory(lines));
-            }
+        if let Some(tx) = &self.app_event_tx {
+            let last = self.entries.last().unwrap();
+            let lines = last.cell.cloned_lines();
+            tx.send(AppEvent::InsertHistory(lines));
         }
     }
 
@@ -392,15 +383,10 @@ impl ConversationHistoryWidget {
 
 impl WidgetRef for ConversationHistoryWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        if self.native_scrollback {
-            // In native scrollback mode we do not render the historical
-            // conversation inside the ratatui buffer. The lines have already
-            // been inserted into the terminal scrollback via
-            // `Terminal::insert_before` (triggered at insertion time). We
-            // purposefully leave this area blank so the enclosing layout can
-            // allocate all available space to the bottom pane / composer.
-            return;
-        }
+        // In the new native scrollback UX we never re-render historical
+        // content inside the ratatui buffer – it already lives in the
+        // terminal scrollback above the inline viewport. Leave blank.
+        return;
         let (title, border_style) = if self.has_input_focus {
             (
                 "Messages (↑/↓ or j/k = line,  b/space = page)",

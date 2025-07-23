@@ -51,8 +51,11 @@ pub(crate) struct ChatWidget<'a> {
     config: Config,
     initial_user_message: Option<UserMessage>,
     token_usage: TokenUsage,
+    // Streaming buffers for incremental insertion into native scrollback.
     reasoning_buffer: String,
     answer_buffer: String,
+    answer_header_emitted: bool,
+    reasoning_header_emitted: bool,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -145,6 +148,8 @@ impl ChatWidget<'_> {
             token_usage: TokenUsage::default(),
             reasoning_buffer: String::new(),
             answer_buffer: String::new(),
+            answer_header_emitted: false,
+            reasoning_header_emitted: false,
         }
     }
 
@@ -249,52 +254,22 @@ impl ChatWidget<'_> {
 
                 self.request_redraw();
             }
-            EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // if the answer buffer is empty, this means we haven't received any
-                // delta. Thus, we need to print the message as a new answer.
-                if self.answer_buffer.is_empty() {
-                    self.conversation_history
-                        .add_agent_message(&self.config, message);
-                } else {
-                    self.conversation_history
-                        .replace_prev_agent_message(&self.config, message);
-                }
-                self.answer_buffer.clear();
-                self.request_redraw();
-            }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
-                if self.answer_buffer.is_empty() {
-                    self.conversation_history
-                        .add_agent_message(&self.config, "".to_string());
-                }
-                self.answer_buffer.push_str(&delta.clone());
-                self.conversation_history
-                    .replace_prev_agent_message(&self.config, self.answer_buffer.clone());
-                self.request_redraw();
+                self.answer_buffer.push_str(&delta);
+                self.emit_answer_completed_lines();
+            }
+            EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                // Final answer text; append and flush remaining.
+                self.answer_buffer.push_str(&message);
+                self.flush_answer_buffer_final();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
-                if self.reasoning_buffer.is_empty() {
-                    self.conversation_history
-                        .add_agent_reasoning(&self.config, "".to_string());
-                }
-                self.reasoning_buffer.push_str(&delta.clone());
-                self.conversation_history
-                    .replace_prev_agent_reasoning(&self.config, self.reasoning_buffer.clone());
-                self.request_redraw();
+                self.reasoning_buffer.push_str(&delta);
+                self.emit_reasoning_completed_lines();
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
-                // if the reasoning buffer is empty, this means we haven't received any
-                // delta. Thus, we need to print the message as a new reasoning.
-                if self.reasoning_buffer.is_empty() {
-                    self.conversation_history
-                        .add_agent_reasoning(&self.config, "".to_string());
-                } else {
-                    // else, we rerender one last time.
-                    self.conversation_history
-                        .replace_prev_agent_reasoning(&self.config, text);
-                }
-                self.reasoning_buffer.clear();
-                self.request_redraw();
+                self.reasoning_buffer.push_str(&text);
+                self.flush_reasoning_buffer_final();
             }
             EventMsg::TaskStarted => {
                 self.bottom_pane.clear_ctrl_c_quit_hint();
@@ -495,26 +470,106 @@ impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let bottom_height = self.bottom_pane.calculate_required_height(&area);
 
-        if std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok() {
-            // In native scroll mode we dedicate the entire viewport to the
-            // bottom pane; historical lines live in the terminal scrollback
-            // above the inline viewport.
-            let pane_area = Rect {
-                x: area.x,
-                y: area.y + area.height.saturating_sub(bottom_height),
-                width: area.width,
-                height: bottom_height,
-            };
-            (&self.bottom_pane).render(pane_area, buf);
-        } else {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(0), Constraint::Length(bottom_height)])
-                .split(area);
+        let pane_area = Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(bottom_height),
+            width: area.width,
+            height: bottom_height,
+        };
+        (&self.bottom_pane).render(pane_area, buf);
+    }
+}
 
-            self.conversation_history.render(chunks[0], buf);
-            (&self.bottom_pane).render(chunks[1], buf);
+impl ChatWidget<'_> {
+    fn emit_answer_completed_lines(&mut self) {
+        if !self.answer_header_emitted {
+            self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(vec![
+                ratatui::text::Line::from("codex".magenta().bold()),
+            ]));
+            self.answer_header_emitted = true;
         }
+        if let Some(last_nl) = self.answer_buffer.rfind('\n') {
+            let completed = self.answer_buffer[..=last_nl].to_string();
+            let remainder = self.answer_buffer[last_nl + 1..].to_string();
+            let mut lines: Vec<ratatui::text::Line<'static>> = completed
+                .lines()
+                .map(|l| ratatui::text::Line::from(l.to_string()))
+                .collect();
+            if !lines.is_empty() {
+                self.app_event_tx
+                    .send(crate::app_event::AppEvent::InsertHistory(lines));
+            }
+            self.answer_buffer = remainder;
+        }
+    }
+
+    fn flush_answer_buffer_final(&mut self) {
+        // Emit any remaining partial line + trailing blank line.
+        if !self.answer_buffer.is_empty() {
+            if !self.answer_header_emitted {
+                self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(vec![
+                    ratatui::text::Line::from("codex".magenta().bold()),
+                ]));
+                self.answer_header_emitted = true;
+            }
+            let mut lines: Vec<ratatui::text::Line<'static>> = vec![
+                ratatui::text::Line::from(self.answer_buffer.clone()),
+                ratatui::text::Line::from(""),
+            ];
+            self.app_event_tx
+                .send(crate::app_event::AppEvent::InsertHistory(lines.drain(..).collect()));
+        } else if self.answer_header_emitted {
+            self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(vec![
+                ratatui::text::Line::from(""),
+            ]));
+        }
+        self.answer_buffer.clear();
+        self.answer_header_emitted = false;
+    }
+
+    fn emit_reasoning_completed_lines(&mut self) {
+        if !self.reasoning_header_emitted {
+            self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(vec![
+                ratatui::text::Line::from("thinking".magenta().italic()),
+            ]));
+            self.reasoning_header_emitted = true;
+        }
+        if let Some(last_nl) = self.reasoning_buffer.rfind('\n') {
+            let completed = self.reasoning_buffer[..=last_nl].to_string();
+            let remainder = self.reasoning_buffer[last_nl + 1..].to_string();
+            let mut lines: Vec<ratatui::text::Line<'static>> = completed
+                .lines()
+                .map(|l| ratatui::text::Line::from(l.to_string()))
+                .collect();
+            if !lines.is_empty() {
+                self.app_event_tx
+                    .send(crate::app_event::AppEvent::InsertHistory(lines));
+            }
+            self.reasoning_buffer = remainder;
+        }
+    }
+
+    fn flush_reasoning_buffer_final(&mut self) {
+        if !self.reasoning_buffer.is_empty() {
+            if !self.reasoning_header_emitted {
+                self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(vec![
+                    ratatui::text::Line::from("thinking".magenta().italic()),
+                ]));
+                self.reasoning_header_emitted = true;
+            }
+            let mut lines: Vec<ratatui::text::Line<'static>> = vec![
+                ratatui::text::Line::from(self.reasoning_buffer.clone()),
+                ratatui::text::Line::from(""),
+            ];
+            self.app_event_tx
+                .send(crate::app_event::AppEvent::InsertHistory(lines.drain(..).collect()));
+        } else if self.reasoning_header_emitted {
+            self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(vec![
+                ratatui::text::Line::from(""),
+            ]));
+        }
+        self.reasoning_buffer.clear();
+        self.reasoning_header_emitted = false;
     }
 }
 

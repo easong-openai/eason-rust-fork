@@ -13,6 +13,7 @@ use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use color_eyre::eyre::Result;
+use ratatui::widgets::Widget;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
@@ -327,16 +328,9 @@ impl App<'_> {
                         widget.apply_file_search_result(query, matches);
                     }
                 }
-            }
-            AppEvent::InsertHistory(lines) => {
-                // Render the provided lines *above* the inline viewport so
-                // they become part of the terminal's native scrollback. This
-                // path is a transitional feature guarded by the
-                // CODEX_TUI_NATIVE_SCROLL env var; when unset this event is
-                // never produced.
-                if std::env::var("CODEX_TUI_NATIVE_SCROLL").is_ok() {
+                AppEvent::InsertHistory(lines) => {
                     use ratatui::widgets::Paragraph;
-                    let height: u16 = lines.len() as u16; // lines already wrapped
+                    let height: u16 = lines.len() as u16;
                     let _ = terminal.insert_before(height, |buf| {
                         Paragraph::new(lines.clone()).render(buf.area, buf);
                     });
