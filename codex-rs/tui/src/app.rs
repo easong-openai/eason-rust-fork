@@ -16,10 +16,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
-use ratatui::layout::Rect;
-use ratatui::text::Line;
-use ratatui::widgets::Paragraph;
-use ratatui::widgets::Widget;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -208,115 +204,7 @@ impl App<'_> {
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
                 AppEvent::InsertHistory(lines) => {
-                    use unicode_width::UnicodeWidthChar;
-                    let term_width = terminal.size().map(|a| a.width).unwrap_or(80) as usize;
-                    let mut physical: Vec<ratatui::text::Line<'static>> = Vec::new();
-
-                    for logical in lines.into_iter() {
-                        if logical.spans.is_empty() {
-                            physical.push(logical);
-                            continue;
-                        }
-
-                        let mut line_spans: Vec<ratatui::text::Span<'static>> = Vec::new();
-                        let mut line_width: usize = 0;
-
-                        // Local helper to flush current line.
-                        let mut flush_line = |store: &mut Vec<ratatui::text::Line<'static>>, spans: &mut Vec<ratatui::text::Span<'static>>, width: &mut usize| {
-                            store.push(ratatui::text::Line::from(spans.clone()));
-                            spans.clear();
-                            *width = 0;
-                        };
-
-                        // Process spans tokenizing into words and whitespace.
-                        for span in logical.spans.into_iter() {
-                            let style = span.style;
-                            let mut buf_word = String::new();
-                            let mut buf_space = String::new();
-                            let mut flush_word = |word: &mut String, line_spans: &mut Vec<ratatui::text::Span<'static>>, line_width: &mut usize, store: &mut Vec<ratatui::text::Line<'static>>| {
-                                if word.is_empty() { return; }
-                                let w_len: usize = word.chars().map(|c| UnicodeWidthChar::width(c).unwrap_or(0)).sum();
-                                if *line_width > 0 && *line_width + w_len > term_width {
-                                    flush_line(store, line_spans, line_width);
-                                }
-                                if w_len > term_width && *line_width == 0 {
-                                    // Break an overlong word across lines.
-                                    let mut cur = String::new();
-                                    let mut cur_w = 0usize;
-                                    for ch in word.chars() {
-                                        let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
-                                        if cur_w + ch_w > term_width && cur_w > 0 {
-                                            line_spans.push(ratatui::text::Span::styled(cur.clone(), style));
-                                            flush_line(store, line_spans, line_width);
-                                            cur.clear();
-                                            cur_w = 0;
-                                        }
-                                        cur.push(ch);
-                                        cur_w += ch_w;
-                                    }
-                                    if !cur.is_empty() {
-                                        line_spans.push(ratatui::text::Span::styled(cur.clone(), style));
-                                        *line_width += cur_w;
-                                    }
-                                } else {
-                                    line_spans.push(ratatui::text::Span::styled(word.clone(), style));
-                                    *line_width += w_len;
-                                }
-                                word.clear();
-                            };
-
-                            for ch in span.content.chars() {
-                                if ch == '\n' {
-                                    flush_word(&mut buf_word, &mut line_spans, &mut line_width, &mut physical);
-                                    buf_space.clear();
-                                    flush_line(&mut physical, &mut line_spans, &mut line_width);
-                                    continue;
-                                }
-                                if ch.is_whitespace() {
-                                    if !buf_word.is_empty() {
-                                        flush_word(&mut buf_word, &mut line_spans, &mut line_width, &mut physical);
-                                    }
-                                    buf_space.push(ch);
-                                } else {
-                                    if !buf_space.is_empty() {
-                                        // Add a single space if it fits (collapse runs)
-                                        let space_w: usize = buf_space.chars().map(|c| UnicodeWidthChar::width(c).unwrap_or(0)).sum();
-                                        if line_width > 0 && line_width + space_w > term_width {
-                                            flush_line(&mut physical, &mut line_spans, &mut line_width);
-                                        }
-                                        if line_width > 0 { // avoid leading spaces
-                                            line_spans.push(ratatui::text::Span::styled(" ".to_string(), style));
-                                            line_width += 1;
-                                        }
-                                        buf_space.clear();
-                                    }
-                                    buf_word.push(ch);
-                                }
-                                // Wrap if current line exactly full.
-                                if line_width >= term_width {
-                                    flush_line(&mut physical, &mut line_spans, &mut line_width);
-                                }
-                            }
-                            // Flush any dangling word at span end.
-                            flush_word(&mut buf_word, &mut line_spans, &mut line_width, &mut physical);
-                            // (whitespace buffer intentionally deferred so collapses across spans.)
-                        }
-                        if !line_spans.is_empty() {
-                            physical.push(ratatui::text::Line::from(line_spans));
-                        } else {
-                            // Preserve explicit blank line (e.g. trailing newline)
-                            physical.push(ratatui::text::Line::from(Vec::<ratatui::text::Span<'static>>::new()));
-                        }
-                    }
-
-                    let total = physical.len() as u16;
-                    terminal.insert_before(total, |buf| {
-                        let width = buf.area.width;
-                        for (i, line) in physical.into_iter().enumerate() {
-                            let area = Rect { x: 0, y: i as u16, width, height: 1 };
-                            Paragraph::new(line).render(area, buf);
-                        }
-                    }).ok();
+                    crate::insert_history::insert_history_lines(terminal, lines);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::RequestRedraw => {
@@ -438,6 +326,15 @@ impl App<'_> {
         terminal.clear()?;
 
         Ok(())
+    }
+
+    pub(crate) fn token_usage(&self) -> codex_core::protocol::TokenUsage {
+        match &self.app_state {
+            AppState::Chat { widget } => widget.token_usage().clone(),
+            AppState::Login { .. } | AppState::GitWarning { .. } => {
+                codex_core::protocol::TokenUsage::default()
+            }
+        }
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {

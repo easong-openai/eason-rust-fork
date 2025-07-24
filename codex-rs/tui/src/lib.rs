@@ -33,6 +33,7 @@ mod file_search;
 mod get_git_diff;
 mod git_warning_screen;
 mod history_cell;
+mod insert_history;
 mod log_layer;
 mod login_screen;
 mod markdown;
@@ -46,7 +47,10 @@ mod user_approval_widget;
 
 pub use cli::Cli;
 
-pub fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> std::io::Result<()> {
+pub fn run_main(
+    cli: Cli,
+    codex_linux_sandbox_exe: Option<PathBuf>,
+) -> std::io::Result<codex_core::protocol::TokenUsage> {
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -146,24 +150,8 @@ pub fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> std::io::
     // `--allow-no-git-exec` flag.
     let show_git_warning = !cli.skip_git_repo_check && !is_inside_git_repo(&config);
 
-    try_run_ratatui_app(cli, config, show_login_screen, show_git_warning, log_rx);
-    Ok(())
-}
-
-#[expect(
-    clippy::print_stderr,
-    reason = "Resort to stderr in exceptional situations."
-)]
-fn try_run_ratatui_app(
-    cli: Cli,
-    config: Config,
-    show_login_screen: bool,
-    show_git_warning: bool,
-    log_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
-) {
-    if let Err(report) = run_ratatui_app(cli, config, show_login_screen, show_git_warning, log_rx) {
-        eprintln!("Error: {report:?}");
-    }
+    run_ratatui_app(cli, config, show_login_screen, show_git_warning, log_rx)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))
 }
 
 fn run_ratatui_app(
@@ -172,7 +160,7 @@ fn run_ratatui_app(
     show_login_screen: bool,
     show_git_warning: bool,
     mut log_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
-) -> color_eyre::Result<()> {
+) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
     color_eyre::install()?;
 
     // Forward panic reports through tracing so they appear in the UI status
@@ -203,9 +191,11 @@ fn run_ratatui_app(
     }
 
     let app_result = app.run(&mut terminal);
+    let usage = app.token_usage();
 
     restore();
-    app_result
+    // ignore error when collecting usage – report underlying error instead
+    app_result.map(|_| usage)
 }
 
 #[expect(

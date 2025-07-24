@@ -522,6 +522,10 @@ impl ChatWidget<'_> {
             tracing::error!("failed to submit op: {e}");
         }
     }
+
+    pub(crate) fn token_usage(&self) -> &TokenUsage {
+        &self.token_usage
+    }
 }
 
 impl WidgetRef for &ChatWidget<'_> {

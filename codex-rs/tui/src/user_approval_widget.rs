@@ -357,8 +357,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
         // too small even for the minimal layout – in this unlikely case we
         // fall back to zero-height prompt so at least the options are
         // visible.
-        let prompt_height = full_prompt_height
-            .min(inner.height.saturating_sub(min_response_rows));
+        let prompt_height = full_prompt_height.min(inner.height.saturating_sub(min_response_rows));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
